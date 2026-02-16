@@ -1,229 +1,282 @@
 import streamlit as st
 import itertools
+from PIL import Image, ImageDraw, ImageFont
+import io
 
 # --- ตั้งค่าหน้าเว็บ ---
-st.set_page_config(
-    page_title="K-L",
-    page_icon="🎰",
-    layout="centered"
-)
+st.set_page_config(page_title="K-LOTTO", page_icon="", layout="centered")
 
-# --- ใส่ CSS ให้ดูสวยแบบ Dark Mode ---
+# --- CSS: แต่งหน้าจอให้สวยและซ่อน Element ที่ไม่จำเป็น ---
 st.markdown("""
 <style>
-    .stApp {
-        background-color: #0E1117;
-        color: #FAFAFA;
-    }
-    .big-font {
-        font-size:24px !important;
-        font-weight: bold;
-    }
-    .result-box {
+    .stApp { background-color: #0E1117; }
+    .block-container { padding-top: 2rem; padding-bottom: 2rem; }
+    
+    /* การ์ดผลลัพธ์ */
+    .result-card {
         background-color: #262730;
-        padding: 20px;
-        border-radius: 10px;
-        border: 1px solid #4F4F4F;
+        border: 2px solid #D4AF37; /* สีทอง */
+        border-radius: 15px;
+        padding: 15px;
+        text-align: center;
+        box-shadow: 0 4px 15px 0 rgba(0,0,0,0.5);
         margin-bottom: 20px;
     }
-    .highlight {
-        color: #FF4B4B;
-        font-weight: bold;
+    .den-rong-box {
+        display: flex; justify-content: space-around; align-items: center;
+        margin-bottom: 10px; border-bottom: 1px solid #555; padding-bottom: 10px;
     }
-    .footer {
-        position: fixed;
-        left: 0;
-        bottom: 0;
-        width: 100%;
-        background-color: #0E1117;
-        color: white;
-        text-align: center;
-        padding: 10px;
-        border-top: 1px solid #4F4F4F;
+    .big-num { font-size: 2rem; font-weight: bold; color: #FF4B4B; }
+    .sec-header { font-size: 0.9rem; color: #BBB; margin-top: 8px; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 1px; }
+    
+    /* Grid ตัวเลข */
+    .sniper-grid { 
+        display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; 
+        font-weight: bold; font-size: 1.2rem; color: #FFD700;
     }
+    .sniper-3-grid {
+        display: flex; justify-content: center; gap: 15px; flex-wrap: wrap;
+        font-weight: bold; font-size: 1.1rem; color: #00CC96;
+    }
+    
+    .vin-box { font-size: 0.85rem; text-align: left; margin-top: 8px; color: #EEE; background: #333; padding: 5px; border-radius: 5px;}
+    .footer { font-size: 0.7rem; color: #666; margin-top: 15px; }
+    
+    /* ซ่อน UI ของ Streamlit */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
 
-# --- 1. ส่วนคำนวณ (Logic v25) ---
+# --- 1. Logic คำนวณ (เหมือนเดิม) ---
 def calculate_mbfs_v25(upper_3, lower_2):
-    if len(upper_3) == 3:
-        t_up = int(upper_3[1])
-        u_up = int(upper_3[2])
-    else:
-        t_up = int(upper_3[0])
-        u_up = int(upper_3[1])
-        
-    t_low = int(lower_2[0])
-    u_low = int(lower_2[1])
+    if len(upper_3) == 3: t_up, u_up = int(upper_3[1]), int(upper_3[2])
+    else: t_up, u_up = int(upper_3[0]), int(upper_3[1])
+    t_low, u_low = int(lower_2[0]), int(lower_2[1])
 
     base_a = (t_up + u_up + t_low + u_low) % 10
     base_b = (t_up + u_low) % 10
+    den, rong = base_a, base_b
 
-    den = base_a
-    rong = base_b
-
-    flow_map = {
-        1: [7, 8, 4], 2: [5, 6, 9], 3: [8, 4, 7],
-        4: [2, 9, 5], 5: [1, 2, 8], 6: [9, 7, 2],
-        7: [1, 3, 8], 8: [3, 4, 1], 9: [6, 4, 5],
-        0: [1, 9, 2]
-    }
+    flow_map = {0:[1,9,2], 1:[7,8,4], 2:[5,6,9], 3:[8,4,7], 4:[2,9,5], 
+                5:[1,2,8], 6:[9,7,2], 7:[1,3,8], 8:[3,4,1], 9:[6,4,5]}
     mirror_map = {1:6, 2:7, 3:8, 4:9, 5:0, 6:1, 7:2, 8:3, 9:4, 0:5}
 
-    priority_list = []
-    priority_list.append(den)
+    priority_list = [den]
     if rong not in priority_list: priority_list.append(rong)
     
-    candidates_a = flow_map.get(den, [])
-    candidates_b = flow_map.get(rong, [])
-    
-    max_len = max(len(candidates_a), len(candidates_b))
-    for i in range(max_len):
-        if i < len(candidates_a):
-            n = candidates_a[i]
-            if n not in priority_list: priority_list.append(n)
-        if i < len(candidates_b):
-            n = candidates_b[i]
-            if n not in priority_list: priority_list.append(n)
+    cand_a = flow_map.get(den, [])
+    cand_b = flow_map.get(rong, [])
+    for i in range(max(len(cand_a), len(cand_b))):
+        if i < len(cand_a) and cand_a[i] not in priority_list: priority_list.append(cand_a[i])
+        if i < len(cand_b) and cand_b[i] not in priority_list: priority_list.append(cand_b[i])
             
-    if den in mirror_map:
-        n = mirror_map[den]
-        if n not in priority_list: priority_list.append(n)
-    if rong in mirror_map:
-        n = mirror_map[rong]
-        if n not in priority_list: priority_list.append(n)
-        
-    for dist in [1, -1, 2, -2, 3, -3]:
+    if den in mirror_map and mirror_map[den] not in priority_list: priority_list.append(mirror_map[den])
+    if rong in mirror_map and mirror_map[rong] not in priority_list: priority_list.append(mirror_map[rong])
+    
+    for dist in [1, -1, 2, -2]:
         for b in [den, rong]:
             n = (b + dist) % 10
             if n not in priority_list: priority_list.append(n)
 
-    vin_main_5 = sorted(priority_list[:5])
-    vin_main_6 = sorted(priority_list[:6])
-    vin_main_7 = sorted(priority_list[:7]) 
-    no_zero_list = [x for x in priority_list if x != 0]
-    vin_no_zero_7 = sorted(no_zero_list[:7])
+    v5 = sorted(priority_list[:5])
+    v6 = sorted(priority_list[:6])
+    v7 = sorted(priority_list[:7])
+    v_no0 = sorted([x for x in priority_list if x != 0][:7])
 
     jor_sets = []
-    for partner in candidates_a:
-        pair = f"{den}{partner}"
-        if pair not in jor_sets and f"{partner}{den}" not in jor_sets:
-            jor_sets.append(pair)
-            
+    for p in cand_a:
+        pair = f"{den}{p}"
+        if pair not in jor_sets and f"{p}{den}" not in jor_sets: jor_sets.append(pair)
     if den != rong:
-        for partner in candidates_b:
-            pair = f"{rong}{partner}"
-            if pair not in jor_sets and f"{partner}{rong}" not in jor_sets:
-                jor_sets.append(pair)
-                
-    pair_dr = f"{den}{rong}"
-    if pair_dr not in jor_sets and f"{rong}{den}" not in jor_sets:
-        jor_sets.insert(0, pair_dr)
-
+        for p in cand_b:
+            pair = f"{rong}{p}"
+            if pair not in jor_sets and f"{p}{rong}" not in jor_sets: jor_sets.append(pair)
+    if f"{den}{rong}" not in jor_sets and f"{rong}{den}" not in jor_sets: jor_sets.insert(0, f"{den}{rong}")
+    
     if len(jor_sets) < 8:
-        extras = list(itertools.combinations(vin_main_5, 2))
+        extras = list(itertools.combinations(v5, 2))
         for p in extras:
-            pair_str = f"{p[0]}{p[1]}"
-            if pair_str not in jor_sets and f"{p[1]}{p[0]}" not in jor_sets:
-                jor_sets.append(pair_str)
+            pair = f"{p[0]}{p[1]}"
+            if pair not in jor_sets and f"{p[1]}{p[0]}" not in jor_sets: jor_sets.append(pair)
             if len(jor_sets) >= 8: break
     jor_sets = jor_sets[:8]
 
-    jor_3_sets = []
-    seen_3_sets = set()
-    pool_candidates = []
+    jor3 = []
+    pool = []
+    c1 = cand_a[0] if cand_a else (den+1)%10
+    pool.append([den, rong, c1])
+    c2 = cand_a[1] if len(cand_a)>1 else (den-1)%10
+    pool.append([den, c1, c2])
+    r1 = cand_b[0] if cand_b else (rong+1)%10
+    r2 = cand_b[1] if len(cand_b)>1 else (rong-1)%10
+    pool.append([rong, r1, r2])
+    pool.append(priority_list[:3])
+    backups = list(itertools.combinations(v7, 3))
+    for b in backups[:10]: pool.append(list(b))
 
-    c1 = candidates_a[0] if candidates_a else (den+1)%10
-    pool_candidates.append([den, rong, c1])
+    seen = set()
+    for s in pool:
+        if len(jor3) >= 5: break
+        uniq = sorted(list(set(s)))
+        while len(uniq) < 3:
+            for x in v7:
+                if x not in uniq: uniq.append(x); break
+        uniq.sort()
+        sig = "".join(map(str, uniq))
+        if sig not in seen:
+            seen.add(sig)
+            jor3.append(sig)
+
+    return den, rong, v5, v6, v7, v_no0, jor_sets, jor3
+
+# --- 2. ฟังก์ชันวาดรูป (Image Generator) ---
+def create_result_image(upper, lower, den, rong, jor, jor3, v7, v_no0):
+    W, H = 600, 850
+    img = Image.new('RGB', (W, H), color='#0E1117')
+    d = ImageDraw.Draw(img)
+    try:
+        font_large = ImageFont.truetype("DejaVuSans-Bold.ttf", 50)
+        font_med = ImageFont.truetype("DejaVuSans-Bold.ttf", 35)
+        font_small = ImageFont.truetype("DejaVuSans.ttf", 25)
+    except:
+        font_large = ImageFont.load_default()
+        font_med = ImageFont.load_default()
+        font_small = ImageFont.load_default()
+
+    def draw_centered(text, y, font, fill):
+        bbox = d.textbbox((0, 0), text, font=font)
+        w = bbox[2] - bbox[0]
+        d.text(((W-w)/2, y), text, font=font, fill=fill)
+
+    d.rectangle([(20, 20), (W-20, H-20)], outline="#D4AF37", width=5)
+    draw_centered("K-LOTTO ANALYZER", 50, font_med, "#FFFFFF")
+    draw_centered(f"ผล: {upper} - {lower}", 100, font_small, "#AAAAAA")
     
-    c2 = candidates_a[1] if len(candidates_a)>1 else (den-1)%10
-    pool_candidates.append([den, c1, c2])
+    d.line([(50, 150), (W-50, 150)], fill="#555555", width=2)
+    d.text((100, 180), f"🔥 เด่น: {den}", font=font_large, fill="#FF4B4B")
+    d.text((350, 180), f"🚩 รอง: {rong}", font=font_large, fill="#FAFAFA")
+    d.line([(50, 260), (W-50, 260)], fill="#555555", width=2)
+
+    draw_centered("🎯 เจาะเน้น", 280, font_med, "#FFFFFF")
+    y_start = 350
+    for i, num in enumerate(jor):
+        row = i // 4
+        col = i % 4
+        x = 70 + (col * 120)
+        y = y_start + (row * 60)
+        d.text((x, y), num, font=font_med, fill="#FFD700")
+
+    draw_centered("🎲 เจาะ 3 ตัว", 500, font_med, "#FFFFFF")
+    y_start = 560
+    for i, num in enumerate(jor3[:3]):
+        d.text((50 + (i*180), y_start), num, font=font_med, fill="#00CC96")
+    d.text((140, y_start+60), jor3[3], font=font_med, fill="#00CC96")
+    d.text((320, y_start+60), jor3[4], font=font_med, fill="#00CC96")
+
+    y_vin = 680
+    d.text((50, y_vin), f"💎 : {' '.join(map(str, v7))}", font=font_small, fill="#EEEEEE")
+    d.text((50, y_vin+40), f"🛡️ : {' '.join(map(str, v_no0))}", font=font_small, fill="#AAAAAA")
+    draw_centered("by khet", 780, font_small, "#666666")
+    return img
+
+# --- 3. UI State Management (ระบบสลับหน้า) ---
+
+# สร้างตัวแปรเก็บสถานะหน้า (Session State)
+if 'page' not in st.session_state:
+    st.session_state.page = 'input' # เริ่มต้นที่หน้า Input
+if 'result_data' not in st.session_state:
+    st.session_state.result_data = None
+
+# ฟังค์ชั่นสำหรับเปลี่ยนหน้า
+def go_to_result():
+    st.session_state.page = 'result'
+def go_to_input():
+    st.session_state.page = 'input'
+
+# --- หน้าจอที่ 1: กรอกข้อมูล (Input Page) ---
+if st.session_state.page == 'input':
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center;'>By Khet", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color:#888;'>ระบบคำนวณ</p>", unsafe_allow_html=True)
+    st.markdown("---")
     
-    r1 = candidates_b[0] if candidates_b else (rong+1)%10
-    r2 = candidates_b[1] if len(candidates_b)>1 else (rong-1)%10
-    pool_candidates.append([rong, r1, r2])
-    
-    pool_candidates.append(priority_list[:3])
-    
-    sorted_vin = sorted(vin_main_7)
-    seq_set = []
-    for i in range(len(sorted_vin)-2):
-        if sorted_vin[i+1] == sorted_vin[i]+1 and sorted_vin[i+2] == sorted_vin[i]+2:
-            seq_set = [sorted_vin[i], sorted_vin[i+1], sorted_vin[i+2]]
-            break
-    if seq_set: pool_candidates.append(seq_set)
-    else: pool_candidates.append([priority_list[0], priority_list[3], priority_list[4]])
-
-    backup_combs = list(itertools.combinations(vin_main_7, 3))
-    for combo in backup_combs[:10]: pool_candidates.append(list(combo))
-
-    for s in pool_candidates:
-        if len(jor_3_sets) >= 5: break
-        unique_s = list(set(s))
-        fill_idx = 0
-        while len(unique_s) < 3:
-            if fill_idx < len(vin_main_7):
-                if vin_main_7[fill_idx] not in unique_s:
-                    unique_s.append(vin_main_7[fill_idx])
-            fill_idx += 1
-        unique_s.sort()
-        sig = f"{unique_s[0]}{unique_s[1]}{unique_s[2]}"
-        if sig not in seen_3_sets:
-            seen_3_sets.add(sig)
-            jor_3_sets.append(sig)
-
-    return den, rong, vin_main_5, vin_main_6, vin_main_7, vin_no_zero_7, jor_sets, jor_3_sets
-
-# --- 2. ส่วนหน้าเว็บ (UI) ---
-st.title("KHET")
-st.caption("ระบบคำนวณ")
-
-col1, col2 = st.columns(2)
-with col1:
-    upper = st.text_input("🔹 บน (3 ตัว)", max_chars=3, placeholder="เช่น 032")
-with col2:
-    lower = st.text_input("🔸 ล่าง (2 ตัว)", max_chars=2, placeholder="เช่น 12")
-
-if st.button("🚀 คำนวณสูตร", use_container_width=True):
-    if len(upper) >= 2 and len(lower) == 2 and upper.isdigit() and lower.isdigit():
-        den, rong, v5, v6, v7, v_no0, jor, jor3 = calculate_mbfs_v25(upper, lower)
-        
-        st.markdown("---")
-        st.subheader("✨ แนวทาง            ")
-        
+    with st.form("calc_form"):
         c1, c2 = st.columns(2)
-        with c1:
-            st.markdown(f"<div class='result-box' style='text-align:center;'>🔥 เด่น<br><span class='big-font highlight'>{den}</span></div>", unsafe_allow_html=True)
-        with c2:
-            st.markdown(f"<div class='result-box' style='text-align:center;'>🚩 รอง<br><span class='big-font'>{rong}</span></div>", unsafe_allow_html=True)
-            
-        st.markdown("##### 🎯 เจาะเน้น")
-        jor_html = ""
-        for i, num in enumerate(jor):
-            jor_html += f"<span style='font-size:20px; font-weight:bold; margin-right:15px; color:#FFD700;'>{num}</span>"
-            if i == 3: jor_html += "<br>"
-        st.markdown(f"<div class='result-box' style='text-align:center;'>{jor_html}</div>", unsafe_allow_html=True)
-
-        st.markdown("##### 🎲 เจาะ 3 ตัว")
-        jor3_html = ""
-        for i, num in enumerate(jor3):
-            jor3_html += f"<span style='font-size:20px; font-weight:bold; margin-right:15px; color:#00CC96;'>{num}</span>"
-            if i == 2: jor3_html += "<br>"
-        st.markdown(f"<div class='result-box' style='text-align:center;'>{jor3_html}</div>", unsafe_allow_html=True)
-
-        st.markdown("##### 💎 ชุดวิน")
-        st.markdown(f"""
-        <div class='result-box'>
-            <b>วิน 5 ตัว :</b> <span class='highlight'>{' '.join(map(str, v5))}</span><br>
-            <b>วิน 6 ตัว :</b> {' '.join(map(str, v6))}<br>
-            <b>วิน 7 ตัว :</b> {' '.join(map(str, v7))}
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown("##### 🛡️")
-        st.success(f"{' '.join(map(str, v_no0))}")
+        upper = c1.text_input("🔹 เลขบน", max_chars=3)
+        lower = c2.text_input("🔸 เลขล่าง", max_chars=2)
         
-    else:
-        st.error("⚠️ กรุณากรอกตัวเลขให้ครบถ้วน")
+        submitted = st.form_submit_button("🚀 คำนวณสูตร", use_container_width=True)
+        
+        if submitted:
+            if len(upper) >= 2 and len(lower) == 2 and upper.isdigit() and lower.isdigit():
+                # คำนวณและบันทึกผลลง Session
+                res = calculate_mbfs_v25(upper, lower)
+                st.session_state.result_data = {
+                    'upper': upper, 'lower': lower,
+                    'den': res[0], 'rong': res[1],
+                    'v5': res[2], 'v6': res[3], 'v7': res[4], 'v_no0': res[5],
+                    'jor': res[6], 'jor3': res[7]
+                }
+                go_to_result() # สั่งเปลี่ยนหน้า
+                st.rerun() # รีเฟรชหน้าจอทันที
+            else:
+                st.error("⚠️ กรุณากรอกตัวเลขให้ครบถ้วน")
 
-st.markdown("<div class='footer'>by khet</div>", unsafe_allow_html=True)
+# --- หน้าจอที่ 2: แสดงผลลัพธ์ (Result Page) ---
+elif st.session_state.page == 'result':
+    data = st.session_state.result_data
+    
+    # สร้างรูปภาพเตรียมไว้
+    img = create_result_image(
+        data['upper'], data['lower'], data['den'], data['rong'],
+        data['jor'], data['jor3'], data['v7'], data['v_no0']
+    )
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    byte_im = buf.getvalue()
+    
+    # แสดงการ์ดผลลัพธ์ (HTML)
+    st.markdown(f"""
+    <div class="result-card">
+        <div style="font-size:0.8rem; color:#888;">ผล: {data['upper']} - {data['lower']}</div>
+        <div class="den-rong-box">
+            <div>🔥 เด่น<br><span class="big-num">{data['den']}</span></div>
+            <div>🚩 รอง<br><span style="font-size:1.8rem; font-weight:bold;">{data['rong']}</span></div>
+        </div>
+        
+        <div class="sec-header">🎯 เจาะเน้น</div>
+        <div class="sniper-grid">
+            {''.join([f'<div>{n}</div>' for n in data['jor']])}
+        </div>
+        
+        <div class="sec-header" style="margin-top:10px;">🎲 เจาะ 3 ตัว</div>
+        <div class="sniper-3-grid">
+            {''.join([f'<div>{n}</div>' for n in data['jor3']])}
+        </div>
+        
+        <div style="margin-top:10px; border-top:1px solid #444; padding-top:5px;">
+            <div class="vin-box">💎 : <span style="color:#FFF;">{' '.join(map(str, data['v7']))}</span></div>
+            <div class="vin-box">🛡️ : <span style="color:#AAA;">{' '.join(map(str, data['v_no0']))}</span></div>
+        </div>
+        <div class="footer">by khet</div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # ปุ่มควบคุม (Download & Back)
+    col_dl, col_reset = st.columns([1, 1])
+    
+    with col_dl:
+        st.download_button(
+            label="📸 โหลด",
+            data=byte_im,
+            file_name=f"KLOTTO_{data['upper']}-{data['lower']}.png",
+            mime="image/png",
+            use_container_width=True
+        )
+        
+    with col_reset:
+        if st.button("🔄 คำนวณใหม่", use_container_width=True):
+            go_to_input()
+            st.rerun()
